@@ -17,10 +17,13 @@
 package com.room.demo.persistence;
 
 
+import android.arch.lifecycle.LiveData;
 import android.arch.persistence.room.Dao;
 import android.arch.persistence.room.Insert;
 import android.arch.persistence.room.OnConflictStrategy;
 import android.arch.persistence.room.Query;
+
+import java.util.List;
 
 import io.reactivex.Flowable;
 
@@ -39,6 +42,15 @@ public interface UserDao {
     @Query("SELECT * FROM Users LIMIT 1")
     Flowable<User> getUser();
 
+    @Query("SELECT * FROM Users")
+    List<User> getUsers(); //如果没有数据，则返回空的List
+
+    @Query("SELECT * FROM Users")
+    Flowable<List<User>> getAllUsers();
+
+    LiveData<List<User>> getAllUsersByLiveData();
+
+
     /**
      * Insert a user in the database. If the user already exists, replace it.
      *
@@ -50,6 +62,6 @@ public interface UserDao {
     /**
      * Delete all users.
      */
-    @Query("DELETE FROM Users")
+    @Query("DELETE  FROM Users")
     void deleteAllUsers();
 }
