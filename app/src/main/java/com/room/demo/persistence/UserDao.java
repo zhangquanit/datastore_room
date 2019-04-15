@@ -48,6 +48,7 @@ public interface UserDao {
     @Query("SELECT * FROM Users")
     Flowable<List<User>> getAllUsers();
 
+    @Query("SELECT * FROM Users")
     LiveData<List<User>> getAllUsersByLiveData();
 
 

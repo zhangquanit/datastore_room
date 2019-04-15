@@ -1,2 +1,521 @@
 
 https://blog.csdn.net/u011897062/article/details/82107709
+
+--------------返回值类型：
+一、query
+任何Object，集合则可以是List和数组，Cursor，或者包装成LiveData
+如果使用了Rxjava2，则可以是Flowable<T>、Publisher<T>,
+1）注意：Rxjava2不允许发射null，但是对于Flowable<T>、Publisher<T>，框架已经帮我们处理了
+RxRoom.java
+    public static <T> Flowable<T> createFlowable(final RoomDatabase database,
+            final String[] tableNames, final Callable<T> callable) {
+        return createFlowable(database, tableNames).observeOn(sAppToolkitIOScheduler)
+                .map(new Function<Object, Optional<T>>() {
+                    @Override
+                    public Optional<T> apply(@NonNull Object o) throws Exception {
+                        T data = callable.call(); //操作数据库返回数据
+                        return new Optional<>(data);
+                    }
+                }).filter(new Predicate<Optional<T>>() {
+                    @Override
+                    public boolean test(@NonNull Optional<T> optional) throws Exception {
+                        return optional.mValue != null; //过滤掉null
+                    }
+                }).map(new Function<Optional<T>, T>() {
+                    @Override
+                    public T apply(@NonNull Optional<T> optional) throws Exception {
+                        return optional.mValue; //取出数据
+                    }
+                });
+    }
+
+2、Flowable<T> and Publisher<T>还会观察数据库变化，数据变化时，会通知observer
+如果不想观察数据变化，可以使用Maybe<T>或Single<T>，但是对于null会报错。
+
+二、update、delete
+update、delete返回void或者int，int表示影响的rows
+
+
+--------------------------------Entity
+1、如果是私有属性，需要提供set或get，或者构造方法注入，public属性可以不用。
+2、每个实体必须定义至少1个字段作为主键。即使只有1个字段，仍然需要用@PrimaryKey注解字段
+此外，如果您想Room自动分配IDs给实体，则可以设置@ PrimaryKey的autoGenerate属性。
+@Entity(tableName = "users")
+public class User {
+    @NonNull
+    @PrimaryKey(autoGenerate = true)
+    @ColumnInfo(name = "userid")
+    private String mId;
+    }
+如果实体具有复合主键，则可以使用@Entity注解的primaryKeys属性，如下面的代码片段所示：
+@Entity(primaryKeys = {"firstName", "lastName"})
+public class User {
+    public String firstName;
+    public String lastName;
+
+    @Ignore
+    Bitmap picture;
+}
+
+3、Room默认使用类名做为表名，也可以指定tableName表名
+@Entity(tableName = "users")
+public class User {
+    ...
+}
+注意：SQLite中的表名不区分大小写。
+
+4、与tableName属性类似，Room使用字段名称作为数据库中的列名。如果希望列具有不同的名称，请将@ColumnInfo注解添加到字段中
+5、Index索引
+索引数据库中的某些字段以加快查询速度，在@Entity注释中包含索引属性
+@Entity(indices = {@Index("name"),
+        @Index(value = {"last_name", "address"})})
+public class User {
+    @PrimaryKey
+    public int id;
+
+    public String firstName;
+    public String address;
+
+    @ColumnInfo(name = "last_name")
+    public String lastName;
+  }
+有时，数据库中的某些字段或字段组必须是唯一的。可以通过将@Index注解的唯一属性设置为true来强制执行此唯一性属性、
+示例防止表中包含两个行，它们包含firstName和lastName列的相同值集
+@Entity(indices = {@Index(value = {"first_name", "last_name"},
+        unique = true)})
+public class User {
+    @PrimaryKey
+    public int id;
+
+    @ColumnInfo(name = "first_name")
+    public String firstName;
+
+    @ColumnInfo(name = "last_name")
+    public String lastName;
+
+    @Ignore
+    Bitmap picture;
+}
+
+6、定义对象之间的关系
+因为SQLite是关系数据库，所以可以指定对象之间的关系。尽管大多数对象关系映射库允许实体对象相互引用，但Room明确禁止这一点
+https://developer.android.google.cn/training/data-storage/room/referencing-data#java
+即使您不能使用直接关系，Room仍然允许您定义实体之间的外键约束。
+例如，如果有另一个实体称为Book，则可以使用@ForeignKey 注解定义其与用户实体的关系，如下面的代码片段所示：
+
+@Entity(foreignKeys = @ForeignKey(entity = User.class,
+                                  parentColumns = "id",
+                                  childColumns = "user_id"))
+public class Book {
+    @PrimaryKey
+    public int bookId;
+
+    public String title;
+
+    @ColumnInfo(name = "user_id")  //属于某个用户
+    public int userId;
+}
+外键非常强大，因为它们允许您指定被引用实体更新时发生的事情。
+例如，如果在@ForeignKey注解中包含onDelete = CASCADE，则删除用户的相应实例时，会删除用户的所有图书，。
+
+7、创建嵌套对象
+比如User类中有个Address对象属性
+
+@Entity
+public class User {
+    @PrimaryKey
+    public int id;
+
+    public String firstName;
+
+    @Embedded
+    public Address address; //类中的属性也会被列入user表中
+}
+
+public class Address {
+    public String street;
+    public String state;
+    public String city;
+
+    @ColumnInfo(name = "post_code")
+    public int postCode;
+}
+表示用户对象的表包含包含以下名称的列：id, firstName, street, state, city, and post_code。
+嵌入式字段还可以包括其他嵌入式字段，也就是Address还可以包含其他类属性
+
+--------------------------------Dao
+DAO既可以是接口，也可以是抽象类。如果是抽象类，它可以有一个构造函数，它把RoomDatabase作为唯一的参数。Room在编译时创建每个DAO实现。
+1、插入
+@Dao
+public interface MyDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    public void insertUsers(User... users);
+
+    @Insert
+    public void insertBothUsers(User user1, User user2);
+
+    @Insert
+    public void insertUsersAndFriends(User user, List<User> friends);
+}
+如果@Insert方法只接收1个参数，则可以返回一个Long型的值，这是插入项的新rowId。如果参数是数组或集合，则应该返回long[] 或者 List类型的值。
+
+2、更新
+Update方法在数据库中用于修改一组实体的字段。它使用每个实体的主键来匹配查询。
+@Dao
+public interface MyDao {
+    @Update
+    public int updateUsers(User... users);
+}
+可以使此方法返回int型值，以指示数据库中更新的行数。
+
+3、删除
+Delete方法用于从数据库中删除给定参数的一系列实体，它使用主键匹配数据库中相应的行。
+@Dao
+public interface MyDao {
+    @Delete
+    public int deleteUsers(User user);
+    @Delete
+    public int[] deleteUsers(List<User> users);
+}
+可以使此方法返回int值，以指示从数据库中删除的行数。
+
+4、查询
+@Dao
+public interface MyDao {
+    @Query("SELECT * FROM user")
+    public User[] loadAllUsers();
+}
+
+**将参数传递到查询中
+@Dao
+public interface MyDao {
+    @Query("SELECT * FROM user WHERE age > :minAge")
+    public User[] loadAllUsersOlderThan(int minAge);
+}
+
+**返回列的子集
+大多数时候，你只需要得到一个实体的几个字段，比如只想得到User表中的first name和last name字段。
+public class NameTuple {
+    @ColumnInfo(name="first_name")
+    public String firstName;
+
+    @ColumnInfo(name="last_name")
+    public String lastName;
+}
+只要可以将结果列映射到返回的对象中即可。
+现在，您可以在查询方法中使用此POJO：
+@Dao
+public interface MyDao {
+    @Query("SELECT first_name, last_name FROM user")
+    public List<NameTuple> loadFullName();
+}
+Room知道查询返回first_name和last_name列的值，并且这些值可以映射到NameTuple类的字段中。
+因此，Room可以生成适当的代码。如果查询返回太多列，或一列在NameTuple类中不存在，则Room将显示警告。
+注意：这些POJOs也可以使用@Embedded注解。
+
+**传递参数集合
+有些查询可能要求您传递一个可变数量的参数，其中参数的确切数目直到运行时才知道。
+@Dao
+public interface MyDao {
+    @Query("SELECT first_name, last_name FROM user WHERE region IN (:regions)")
+    public List<NameTuple> loadUsersFromRegions(List<String> regions);
+}
+
+**可观察的查询
+当执行查询时，您经常希望应用程序的UI在数据更改时自动更新。
+要实现这一点，请在查询方法描述中使用类型LiveData的返回值。当数据库被更新时，Room生成所有必要的代码来更新LiveData。
+@Dao
+public interface MyDao {
+    @Query("SELECT first_name, last_name FROM user WHERE region IN (:regions)")
+    public LiveData<List<User>> loadUsersFromRegionsSync(List<String> regions);
+}
+注意：在版本1中，Room根据查询列表来决定是否更新LiveData的实例。
+
+**RXJava的响应式查询
+Room还可以从您定义的查询中返回RXJava2 Publisher和Flowable动对象。
+若要使用此功能，请将android.arch.persistence.room:rxjava2库添加到gradle的依赖关系中。
+@Dao
+public interface MyDao {
+    @Query("SELECT * from user where id = :id LIMIT 1")
+    public Flowable<User> loadUserById(int id);
+}
+
+**直接Cursor访问
+@Dao
+public interface MyDao {
+    @Query("SELECT * FROM user WHERE age > :minAge LIMIT 5")
+    public Cursor loadRawUsersOlderThan(int minAge);
+}
+
+**多表查询
+有些查询可能需要访问多个表来计算结果。Room允许您编写任何查询，因此您也可以多表联合查询。
+此外，如果返回的是可观察的数据类型，例如Flowable或LiveData，Room将监视所有在查询中引用到的表，用于刷新数据。
+
+下面的代码片段说明如何执行多表查询，示例代码包含了用户、图书和借出数据表之间的关联信息：
+@Dao
+public interface MyDao {
+    @Query("SELECT * FROM book "
+           + "INNER JOIN loan ON loan.book_id = book.id "
+           + "INNER JOIN user ON user.id = loan.user_id "
+           + "WHERE user.name LIKE :userName")
+   public List<Book> findBooksBorrowedByNameSync(String userName);
+}
+
+还可以从这些查询中返回POJOs。例如，您可以编写一个查询，加载用户和他们的宠物的名字如下：
+@Dao
+public interface MyDao {
+   @Query("SELECT user.name AS userName, pet.name AS petName "
+          + "FROM user, pet "
+          + "WHERE user.id = pet.user_id")
+   public LiveData<List<UserPet>> loadUserAndPetNames();
+
+   static class UserPet {
+       public String userName;
+       public String petName;
+   }
+}
+
+-------------------------Room数据库迁移
+1、编写Migration类来保存用户数据。每个迁移类指定起始版本和终结版本。在运行时，Room运行每个迁移类的migrate()方法，使用正确的顺序将数据库迁移到后面的版本。
+注意：如果您不提供必要的迁移，则Room会重新构建数据库，这意味着您将丢失数据库中的所有数据。
+
+Room.databaseBuilder(getApplicationContext(), MyDb.class, "database-name")
+        .addMigrations(MIGRATION_1_2, MIGRATION_2_3).build();
+
+static final Migration MIGRATION_1_2 = new Migration(1, 2) { // 1升级到2版本
+    @Override
+    public void migrate(SupportSQLiteDatabase database) {
+        database.execSQL("CREATE TABLE `Fruit` (`id` INTEGER, "
+                + "`name` TEXT, PRIMARY KEY(`id`))");
+    }
+};
+
+static final Migration MIGRATION_2_3 = new Migration(2, 3) { // 2升级到3版本
+    @Override
+    public void migrate(SupportSQLiteDatabase database) {
+        database.execSQL("ALTER TABLE Book "
+                + " ADD COLUMN pub_year INTEGER");
+    }
+};
+
+2、测试迁移
+1）导出schemas
+android {
+    ...
+    defaultConfig {
+        ...
+        javaCompileOptions {
+            annotationProcessorOptions {
+                arguments = ["room.schemaLocation":
+                             "$projectDir/schemas".toString()]
+            }
+        }
+    }
+}
+
+您应该在您的版本控制系统中存储表示数据库的schema历史的导出JSON文件，因为它允许Room创建用于测试目的的数据库的旧版本。
+数据库迁移Sample：https://github.com/googlesamples/android-architecture-components/tree/master/PersistenceMigrationsSample
+
+
+--------------------------使用Room引用复杂数据
+1、使用类型转换器
+应用程序需要使用自定义数据类型，其值要存储在单个数据库列中。为了向自定义类型添加这种支持，您提供了一个TypeConverter，它将自定义类转换为一个已知的类型
+例如，如果我们想保存Date实例，可以编写以下TypeConverter来在数据库中存储等效UNIX时间戳：
+
+public class Converters {
+    @TypeConverter
+    public static Date fromTimestamp(Long value) {
+        return value == null ? null : new Date(value);
+    }
+
+    @TypeConverter
+    public static Long dateToTimestamp(Date date) {
+        return date == null ? null : date.getTime();
+    }
+}
+
+前面的示例定义了2个函数，一个将Date对象转换为Long对象，另一个函数执行从Long到Date的逆转换。
+由于Room已经知道如何保存Long对象，所以它可以使用这个转换器来保存类型为Date的值。
+
+接下来，向AppDatabase类添加@TypeConverters注释，以便AppDatabase可以使用您为每个entity定义的转换器和DAO：
+
+@Database(entities = {User.class}, version = 1)
+@TypeConverters({Converters.class})
+public abstract class AppDatabase extends RoomDatabase {
+    public abstract UserDao userDao();
+}
+
+使用这些转换器，您就可以在其他查询中使用您的自定义类型，就像使用原始类型一样，如下面的代码片段所示：
+
+@Entity
+public class User {
+    ...
+    private Date birthday;
+}
+
+@Dao
+public interface UserDao {
+    ...
+    @Query("SELECT * FROM user WHERE birthday BETWEEN :from AND :to")
+    List findUsersBornBetweenDates(Date from, Date to);
+}
+
+--------------理解为什么Room不允许对象引用
+
+
+
+
+
+2、处理Schema export Error
+Error:(22, 17) 警告: Schema export directory is not provided to the annotation processor so we cannot export the schema.
+You can either provide `room.schemaLocation` annotation processor argument OR set exportSchema to false.
+解决方式1：
+给RoomDatabase设置exportSchema注解为false。
+@Database(entities = { YourEntity.class }, version = 1, exportSchema = false)
+public abstract class MovieDatabase extends RoomDatabase {
+}
+解决方式2：
+在项目中gradle中通过 annotationProcessorOptions 注解，为room.schemaLocation指定schemas的子文件夹。
+android {
+    compileSdkVersion 26
+    buildToolsVersion "26.0.2"
+    defaultConfig {
+        applicationId "com.xingen.architecturecomponents"
+        minSdkVersion 15
+        targetSdkVersion 26
+        versionCode 1
+        versionName "1.0"
+        testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
+
+        //指定room.schemaLocation生成的文件路径
+        javaCompileOptions {
+            annotationProcessorOptions {
+                arguments = ["room.schemaLocation": "$projectDir/schemas".toString()]
+            }
+        }
+    }
+
+}
+
+
+SupportSQLiteOpenHelper{
+
+SupportSQLiteDatabase getWritableDatabase();
+}
+
+class FrameworkSQLiteOpenHelper implements SupportSQLiteOpenHelper {
+    private final OpenHelper mDelegate;
+
+    FrameworkSQLiteOpenHelper(Context context, String name,
+            Callback callback) {
+        mDelegate = createDelegate(context, name, callback);
+    }
+
+
+ static class OpenHelper extends SQLiteOpenHelper { //真实的SQLiteOpenHelper
+        final FrameworkSQLiteDatabase[] mDbRef;
+        final Callback mCallback; //mCallback=RoomOpenHelper
+        private boolean mMigrated;
+
+        OpenHelper(Context context, String name, final FrameworkSQLiteDatabase[] dbRef,
+                final Callback callback) {
+            super(context, name, null, callback.version,
+                    new DatabaseErrorHandler() {
+                        @Override
+                        public void onCorruption(SQLiteDatabase dbObj) {
+                            FrameworkSQLiteDatabase db = dbRef[0];
+                            if (db != null) {
+                                callback.onCorruption(db);
+                            }
+                        }
+                    });
+            mCallback = callback;
+            mDbRef = dbRef;
+        }
+
+        synchronized SupportSQLiteDatabase getWritableSupportDatabase() {
+            mMigrated = false;
+            SQLiteDatabase db = super.getWritableDatabase();
+            if (mMigrated) {
+                close();
+                return getWritableSupportDatabase();
+            }
+            return getWrappedDb(db);
+        }
+
+            @Override
+            public void onCreate(SQLiteDatabase sqLiteDatabase) {
+                mCallback.onCreate(getWrappedDb(sqLiteDatabase)); //RoomOpenHelper.onCreate
+            }
+
+            @Override
+            public void onUpgrade(SQLiteDatabase sqLiteDatabase, int oldVersion, int newVersion) {
+                mMigrated = true;
+                mCallback.onUpgrade(getWrappedDb(sqLiteDatabase), oldVersion, newVersion);
+            }
+
+            @Override
+            public void onConfigure(SQLiteDatabase db) {
+                mCallback.onConfigure(getWrappedDb(db));
+            }
+
+            @Override
+            public void onDowngrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+                mMigrated = true;
+                mCallback.onDowngrade(getWrappedDb(db), oldVersion, newVersion);
+            }
+       }
+  }
+
+  public class RoomOpenHelper extends SupportSQLiteOpenHelper.Callback {
+   @Override
+    public void onCreate(SupportSQLiteDatabase db) {
+        updateIdentity(db);
+        mDelegate.createAllTables(db);
+        mDelegate.onCreate(db);
+    }
+
+    @Override
+    public void onUpgrade(SupportSQLiteDatabase db, int oldVersion, int newVersion) {
+        boolean migrated = false;
+        if (mConfiguration != null) {
+            List<Migration> migrations = mConfiguration.migrationContainer.findMigrationPath(
+                    oldVersion, newVersion);
+            if (migrations != null) {
+                for (Migration migration : migrations) {
+                    migration.migrate(db);
+                }
+                mDelegate.validateMigration(db);
+                updateIdentity(db);
+                migrated = true;
+            }
+        }
+        if (!migrated) {
+            if (mConfiguration != null && !mConfiguration.isMigrationRequiredFrom(oldVersion)) {
+                mDelegate.dropAllTables(db);
+                mDelegate.createAllTables(db);
+            } else {
+                throw new IllegalStateException("A migration from " + oldVersion + " to "
+                        + newVersion + " was required but not found. Please provide the "
+                        + "necessary Migration path via "
+                        + "RoomDatabase.Builder.addMigration(Migration ...) or allow for "
+                        + "destructive migrations via one of the "
+                        + "RoomDatabase.Builder.fallbackToDestructiveMigration* methods.");
+            }
+        }
+    }
+
+    @Override
+    public void onDowngrade(SupportSQLiteDatabase db, int oldVersion, int newVersion) {
+        onUpgrade(db, oldVersion, newVersion);
+    }
+
+    @Override
+    public void onOpen(SupportSQLiteDatabase db) {
+        super.onOpen(db);
+        checkIdentity(db);
+        mDelegate.onOpen(db);
+        // there might be too many configurations etc, just clear it.
+        mConfiguration = null;
+    }
+  }

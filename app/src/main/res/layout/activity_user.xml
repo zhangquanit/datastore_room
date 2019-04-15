@@ -22,4 +22,10 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Update username"/>
+    <Button
+        android:id="@+id/update_test"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Update Test"/>
+
 </LinearLayout>

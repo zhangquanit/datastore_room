@@ -31,12 +31,19 @@ import java.util.UUID;
 public class User {
 
     @NonNull
-    @PrimaryKey
+    @PrimaryKey()
     @ColumnInfo(name = "userid")
     private String mId;
 
     @ColumnInfo(name = "username")
     private String mUserName;
+
+    public String password; //如果不在构造函数注入，需要提供set和get
+
+    public boolean isLogin = false;
+
+    public String v2;
+    public String v3;
 
     @Ignore
     public User(String userName) {
@@ -49,11 +56,27 @@ public class User {
         this.mUserName = userName;
     }
 
+    public void setId(String id) {
+        this.mId = id;
+    }
+
     public String getId() {
         return mId;
     }
 
     public String getUserName() {
         return mUserName;
+    }
+
+    @Override
+    public String toString() {
+        return "User{" +
+                "mId='" + mId + '\'' +
+                ", mUserName='" + mUserName + '\'' +
+                ", password='" + password + '\'' +
+                ", isLogin=" + isLogin +
+                ", v2='" + v2 + '\'' +
+                ", v3='" + v3 + '\'' +
+                '}';
     }
 }

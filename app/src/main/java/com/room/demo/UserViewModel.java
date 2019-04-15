@@ -23,6 +23,8 @@ import com.room.demo.persistence.User;
 
 import io.reactivex.Completable;
 import io.reactivex.Flowable;
+import io.reactivex.functions.Action;
+import io.reactivex.functions.Function;
 
 /**
  * View Model for the {@link UserActivity}
@@ -45,9 +47,12 @@ public class UserViewModel extends ViewModel {
     public Flowable<String> getUserName() {
         return mDataSource.getUser()
                 // for every emission of the user, get the user name
-                .map(user -> {
-                    mUser = user;
-                    return user.getUserName();
+                .map(new Function<User, String>() {
+                    @Override
+                    public String apply(User user) throws Exception {
+                        mUser = user;
+                        return user.getUserName();
+                    }
                 });
 
     }
@@ -59,15 +64,15 @@ public class UserViewModel extends ViewModel {
      * @return a {@link Completable} that completes when the user name is updated
      */
     public Completable updateUserName(final String userName) {
-        return Completable.fromAction(() -> {
-            // if there's no use, create a new user.
-            // if we already have a user, then, since the user object is immutable,
-            // create a new user, with the id of the previous user and the updated user name.
-            mUser = mUser == null
-                    ? new User(userName)
-                    : new User(mUser.getId(), userName);
+        return Completable.fromAction(new Action() {
+            @Override
+            public void run() throws Exception {
+                mUser = mUser == null
+                        ? new User(userName)
+                        : new User(mUser.getId(), userName);
 
-            mDataSource.insertOrUpdateUser(mUser);
+                mDataSource.insertOrUpdateUser(mUser);
+            }
         });
     }
 }
